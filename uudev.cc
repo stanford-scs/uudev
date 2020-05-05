@@ -178,6 +178,7 @@ struct uudev {
   uudev() : udev_(udev_new()),
 	    mon_(udev_monitor_new_from_netlink(udev_.get(), "udev")) {}
   bool parse(std::string path);
+  void dumpconf();
   void loop();
 };
 
@@ -209,6 +210,16 @@ uudev::loop()
   }
 }
 
+void
+uudev::dumpconf()
+{
+  for (auto i : config_) {
+    std::cout << "* " << i.first << std::endl
+	      << i.second
+	      << "----------------------------------------------" << std::endl;
+  }
+}
+
 bool
 uudev::parse(std::string path)
 {
@@ -226,14 +237,14 @@ uudev::parse(std::string path)
     if (!file || (!line.empty() && line[0] == '*')) {
       if (!trigger.empty() && actions.tellp()) {
 	config_[trigger] += actions.str();
-	trigger.clear();
-	actions.str("");
       }
+      trigger.clear();
+      actions.str("");
     }
     if (!file) {
       return file.eof();
     }
-    if (line.size() || line[0] != '*') {
+    if (line.empty() || line[0] != '*') {
       actions << line << std::endl;
       continue;
     }
@@ -339,6 +350,8 @@ main(int argc, char **argv)
     sa.sa_handler = SIG_IGN;
     sigaction(SIGCHLD, &sa, nullptr);
     sigaction(SIGPIPE, &sa, nullptr);
+    if (opt_verbose > 0)
+      uu.dumpconf();
     uu.loop();
   }
 }
