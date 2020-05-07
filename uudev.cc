@@ -122,9 +122,10 @@ bool
 DevProps::eq(const std::string &k, const std::string &v) const
 {
   if (k == "DEVLINK")
-    return links_.find(v) != links_.end();
+    return links_.find(v) != links_.end() || (links_.empty() && v.empty());
   auto i = props_.find(k);
-  return i != props_.end() && i->second == v;
+  return (i != props_.end() && i->second == v) ||
+    (i == props_.end() && v.empty());
 }
 
 static void
@@ -234,20 +235,26 @@ Uudev::loop()
   udev_monitor_enable_receiving(mon_.get());
 
   {
-    std::string cmds, debug;
+    std::string cmds, debug1;
     bool runit(false);
     for (auto r : config_) {
       if (r.immediate_) {
 	cmds += r.commands_;
 	if (!r.preamble_) {
 	  runit = true;
-	  if (opt_verbose >= 1)
-	    std::cout << r.rule_ << " (startup)" << std::endl;
+	  if (opt_verbose >= 1) {
+	    debug1 += r.rule_;
+	    debug1 += '\n';
+	  }
 	}
       }
     }
-    if (runit)
+    if (runit) {
+      if (opt_verbose >= 1)
+	std::cout << "** startup" << std::endl
+		  << debug1;
       run(nullptr, cmds);
+    }
   }
 
   for (;;) {
@@ -257,14 +264,14 @@ Uudev::loop()
       continue;
     }
     DevProps props(dev);
-    std::string cmds, debug;
+    std::string cmds, debug1;
     bool runit(false);
     for (auto r : config_) {
       if (!r.pred_(props))
 	continue;
       if (opt_verbose >= 1) {
-	debug += r.commands_;
-	debug += '\n';
+	debug1 += r.rule_;
+	debug1 += '\n';
       }
       cmds += r.commands_;
       if (!r.preamble_)
@@ -275,7 +282,7 @@ Uudev::loop()
 	std::cout << "** ACTION==" << udev_device_get_action(dev.get())
 		  << ", DEVPATH==\"" << udev_device_get_devpath(dev.get())
 		  << "\"" << std::endl
-		  << debug;
+		  << debug1;
       if (opt_verbose >= 2)
 	dump(std::cout, dev);
       run(&dev, cmds);

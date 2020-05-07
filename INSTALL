@@ -1,0 +1,11 @@
+
+This program requires a C++17 compiler.  To build the man page, you
+also need pandoc.
+
+To build this program on linux run:
+
+    make
+
+To install it under /usr run (the default PREFIX is /usr/local), run:
+
+    make install PREFIX=/usr
