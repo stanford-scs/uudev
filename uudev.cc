@@ -13,6 +13,8 @@
 #include <sstream>
 #include <string>
 #include <map>
+#include <regex>
+#include <set>
 
 #include "cleanup.h"
 
@@ -68,6 +70,21 @@ upcase(const char *s)
 }
 
 static void
+list_foreach(udev_list_entry *e,
+	     std::function<void(std::string, std::string)> cb)
+{
+  for (int i = 0; e; e = udev_list_entry_get_next(e), ++i) {
+    const char *k = udev_list_entry_get_name(e),
+      *v = udev_list_entry_get_value(e);
+    if (v)
+      cb(k, v);
+    else
+      cb(std::to_string(i), k);
+  }
+}
+
+#if 0
+static void
 dev_foreach(const unique_udev_device_t &dev,
 	    std::function<void(std::string, std::string)> cb)
 {
@@ -92,6 +109,66 @@ dev_foreach(const unique_udev_device_t &dev,
     cb("MAJOR", std::to_string(major(rdev)));
     cb("MINOR", std::to_string(minor(rdev)));
   }
+#define GET(x)								\
+  list_foreach(udev_device_get_##x##_list_entry(dev.get()),	\
+	       [&cb](std::string k, std::string v) {			\
+		 cb(upcase(#x "[") + k + ']', v);			\
+	       });
+  GET(devlinks);
+  GET(properties);
+  GET(tags);
+#undef GET
+  for (auto e = udev_device_get_sysattr_list_entry(dev.get()); e;
+       e = udev_list_entry_get_next(e)) {
+    const char *k = udev_list_entry_get_name(e);
+    if (const char *v = udev_device_get_sysattr_value(dev.get(), k))
+      cb(k, std::string(v));
+  }
+}
+#else //!0
+static void
+dev_foreach(const unique_udev_device_t &dev,
+	    std::function<void(std::string, std::string)> cb)
+{
+  list_foreach(udev_device_get_devlinks_list_entry(dev.get()),
+	       [&cb](std::string, std::string v) {
+		 cb("DEVLINK", v);
+	       });
+  list_foreach(udev_device_get_properties_list_entry(dev.get()), cb);
+}
+
+#endif //!0
+
+struct DevProps {
+  std::set<std::string> links_;
+  std::map<std::string, std::string> props_;
+  DevProps(const unique_udev_device_t &dev);
+  bool eq(const std::string &k, const std::string &v) const;
+  bool neq(const std::string &k, const std::string &v) const {
+    return !eq(k, v);
+  }
+};
+using DevPred = std::function<bool(const DevProps &)>;
+
+DevProps::DevProps(const unique_udev_device_t &dev)
+{
+  list_foreach(udev_device_get_devlinks_list_entry(dev.get()),
+	       [this](std::string, std::string v) {
+		 links_.emplace(std::move(v));
+	       });
+  list_foreach(udev_device_get_properties_list_entry(dev.get()),
+	       [this](std::string k, std::string v) {
+		 props_.emplace(std::move(k), std::move(v));
+	       });
+}
+
+bool
+DevProps::eq(const std::string &k, const std::string &v) const
+{
+  if (k == "DEVLINK")
+    return links_.find(v) != links_.end();
+  auto i = props_.find(k);
+  return i != props_.end() && i->second == v;
 }
 
 static void
@@ -170,12 +247,19 @@ monitor()
   }
 }
 
-struct uudev {
+struct Uudev {
   unique_udev_t udev_;
   unique_udev_monitor_t mon_;
-  std::map<std::string, std::string> config_;
 
-  uudev() : udev_(udev_new()),
+  struct Rule {
+    DevPred pred_;
+    std::string rule_;
+    std::string commands_;
+  };
+  std::vector<Rule> config_;
+  //std::map<std::string, std::string> config_;
+
+  Uudev() : udev_(udev_new()),
 	    mon_(udev_monitor_new_from_netlink(udev_.get(), "udev")) {}
   bool parse(std::string path);
   void dumpconf();
@@ -183,7 +267,7 @@ struct uudev {
 };
 
 void
-uudev::loop()
+Uudev::loop()
 {
   udev_monitor_enable_receiving(mon_.get());
   for (;;) {
@@ -192,36 +276,67 @@ uudev::loop()
       waitfd(udev_monitor_get_fd(mon_.get()), POLLIN);
       continue;
     }
-    const char *action = udev_device_get_action(dev.get()),
-      *devpath = udev_device_get_devpath(dev.get());
-    if (!action || !devpath)
-      continue;
-    std::string trigger = action + std::string(" ") + devpath;
-    if (opt_verbose >= 1) {
-      std::cout << "* " << trigger << std::endl;
+    DevProps props(dev);
+    for (auto r : config_) {
+      if (!r.pred_(props))
+	continue;
+      if (opt_verbose == 1)
+	std::cout << "* ACTION==" << udev_device_get_action(dev.get())
+		  << ", DEVPATH==\"" << udev_device_get_devpath(dev.get())
+		  << "\"" << std::endl;
       if (opt_verbose >= 2)
 	dump(std::cout, dev);
+      run(dev, r.commands_);
     }
-
-    auto i = config_.find(trigger);
-    if (i == config_.end())
-      continue;
-    run(dev, i->second);
   }
 }
 
 void
-uudev::dumpconf()
+Uudev::dumpconf()
 {
   for (auto i : config_) {
-    std::cout << "* " << i.first << std::endl
-	      << i.second
+    std::cout << i.rule_ << std::endl
+	      << i.commands_
 	      << "----------------------------------------------" << std::endl;
   }
 }
 
+static std::regex rulerx(R"/(\s*(\w+)\s*(==|!=)\s*"([^"]*)"\s*)/");
+static DevPred
+parserule(std::string line)
+{
+  if (line.size() < 2 || line[0] != '*' || !isspace(line[1]))
+    return nullptr;
+
+  DevPred ret([](const DevProps &p) { return true; });
+
+  auto p = line.cbegin() + 2, e = line.cend();
+  std::smatch m;
+  while (regex_search(p, e, m, rulerx)) {
+    const std::string k = m.str(1), v = m.str(3);
+    if (m.str(2) == "==")
+      ret = [=](const DevProps &p) { return p.eq(k, v) && ret(p); };
+    else if (m.str(2) == "!=")
+      ret = [=](const DevProps &p) { return p.neq(k, v) && ret(p); };
+    else
+      return nullptr;
+
+    p = m.suffix().first;
+    if (p == e)
+      break;
+    else if (*p != ',')
+      return nullptr;
+    p++;
+  }
+  while (p < e && isspace(*p))
+    p++;
+  if (p != e)
+    return nullptr;
+  return ret;
+}
+
 bool
-uudev::parse(std::string path)
+Uudev::parse(std::string path)
 {
   std::ifstream file(path);
   if (file.fail()) {
@@ -230,13 +345,18 @@ uudev::parse(std::string path)
   }
 
   std::string trigger;
+  DevPred predicate;
   std::ostringstream actions;
-  for (int lineno = 0;; ++lineno) {
+  for (int lineno = 1;; ++lineno) {
     std::string line;
     std::getline(file, line);
     if (!file || (!line.empty() && line[0] == '*')) {
-      if (!trigger.empty() && actions.tellp()) {
-	config_[trigger] += actions.str();
+      if (predicate && actions.tellp()) {
+	Rule r;
+	r.rule_ = trigger;
+	r.pred_ = predicate;
+	r.commands_ = actions.str();
+	config_.emplace_back(std::move(r));
       }
       trigger.clear();
       actions.str("");
@@ -250,9 +370,11 @@ uudev::parse(std::string path)
     }
     std::istringstream ss(line);
     std::string star, act, dev;
-    if (!(ss >> star >> act >> dev) || star != "*")
-      continue;
-    trigger = act + " " + dev;
+    trigger = line;
+    predicate = parserule(line);
+    if (!predicate) {
+      std::cerr << path << ":" << lineno << ": syntax error" << std::endl;
+    }
   }
   return true;
 }
@@ -342,7 +464,7 @@ main(int argc, char **argv)
   else if (opt_monitor)
     monitor();
   else {
-    uudev uu;
+    Uudev uu;
     if (!uu.parse(get_confpath()))
       exit(1);
     struct sigaction sa;
