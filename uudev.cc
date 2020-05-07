@@ -238,7 +238,9 @@ monitor()
       continue;
     }
     std::cout << "* " << udev_device_get_action(dev.get()) << " "
-	      << udev_device_get_devpath(dev.get()) << std::endl;
+	      << udev_device_get_devpath(dev.get())
+	      << " (" << udev_device_get_subsystem(dev.get())
+	      << ")" << std::endl;
     if (opt_verbose) {
       dump(std::cout, dev);
       std::cout << "----------------------------------------------"
@@ -257,7 +259,6 @@ struct Uudev {
     std::string commands_;
   };
   std::vector<Rule> config_;
-  //std::map<std::string, std::string> config_;
 
   Uudev() : udev_(udev_new()),
 	    mon_(udev_monitor_new_from_netlink(udev_.get(), "udev")) {}
