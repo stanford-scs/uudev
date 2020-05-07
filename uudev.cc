@@ -6,6 +6,7 @@
 #include <signal.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <libudev.h>
 
 #include <fstream>
@@ -83,49 +84,6 @@ list_foreach(udev_list_entry *e,
   }
 }
 
-#if 0
-static void
-dev_foreach(const unique_udev_device_t &dev,
-	    std::function<void(std::string, std::string)> cb)
-{
-#define GET(x)							\
-  do {								\
-    if (const char *val = udev_device_get_##x(dev.get())) {	\
-      cb(upcase(#x), val);					\
-    }								\
-  } while(0)
-  GET(action);
-  GET(devpath);
-  GET(syspath);
-  GET(sysname);
-  GET(sysnum);
-  GET(devnode);
-  GET(devtype);
-  GET(subsystem);
-  GET(driver);
-#undef GET
-  dev_t rdev = udev_device_get_devnum(dev.get());
-  if (rdev != 0) {
-    cb("MAJOR", std::to_string(major(rdev)));
-    cb("MINOR", std::to_string(minor(rdev)));
-  }
-#define GET(x)								\
-  list_foreach(udev_device_get_##x##_list_entry(dev.get()),	\
-	       [&cb](std::string k, std::string v) {			\
-		 cb(upcase(#x "[") + k + ']', v);			\
-	       });
-  GET(devlinks);
-  GET(properties);
-  GET(tags);
-#undef GET
-  for (auto e = udev_device_get_sysattr_list_entry(dev.get()); e;
-       e = udev_list_entry_get_next(e)) {
-    const char *k = udev_list_entry_get_name(e);
-    if (const char *v = udev_device_get_sysattr_value(dev.get(), k))
-      cb(k, std::string(v));
-  }
-}
-#else //!0
 static void
 dev_foreach(const unique_udev_device_t &dev,
 	    std::function<void(std::string, std::string)> cb)
@@ -136,8 +94,6 @@ dev_foreach(const unique_udev_device_t &dev,
 	       });
   list_foreach(udev_device_get_properties_list_entry(dev.get()), cb);
 }
-
-#endif //!0
 
 struct DevProps {
   std::set<std::string> links_;
@@ -192,7 +148,7 @@ dev_setenv(const unique_udev_device_t &dev)
 }
 
 static void
-run(const unique_udev_device_t &dev, const std::string cmds)
+run(const unique_udev_device_t *dev, const std::string cmds)
 {
   int fds[2];
   if (pipe(fds) == -1) {
@@ -209,7 +165,8 @@ run(const unique_udev_device_t &dev, const std::string cmds)
   }
   else if (pid == 0) {
     close(fds[1]);
-    dev_setenv(dev);
+    if (dev)
+      dev_setenv(*dev);
     if (fds[0] != 0) {
       dup2(fds[0], 0);
       close(fds[0]);
@@ -223,6 +180,7 @@ run(const unique_udev_device_t &dev, const std::string cmds)
   }
   write(fds[1], cmds.data(), cmds.size());
   close(fds[1]);
+  waitpid(pid, nullptr, 0);
 }
 
 void
@@ -257,6 +215,9 @@ struct Uudev {
     DevPred pred_;
     std::string rule_;
     std::string commands_;
+    bool immediate_ = false;
+    bool preamble_ = false;
+    bool parse(std::string line);
   };
   std::vector<Rule> config_;
 
@@ -271,6 +232,24 @@ void
 Uudev::loop()
 {
   udev_monitor_enable_receiving(mon_.get());
+
+  {
+    std::string cmds, debug;
+    bool runit(false);
+    for (auto r : config_) {
+      if (r.immediate_) {
+	cmds += r.commands_;
+	if (!r.preamble_) {
+	  runit = true;
+	  if (opt_verbose >= 1)
+	    std::cout << r.rule_ << " (startup)" << std::endl;
+	}
+      }
+    }
+    if (runit)
+      run(nullptr, cmds);
+  }
+
   for (;;) {
     unique_udev_device_t dev(udev_monitor_receive_device(mon_.get()));
     if (!dev) {
@@ -278,16 +257,28 @@ Uudev::loop()
       continue;
     }
     DevProps props(dev);
+    std::string cmds, debug;
+    bool runit(false);
     for (auto r : config_) {
       if (!r.pred_(props))
 	continue;
-      if (opt_verbose == 1)
-	std::cout << "* ACTION==" << udev_device_get_action(dev.get())
+      if (opt_verbose >= 1) {
+	debug += r.commands_;
+	debug += '\n';
+      }
+      cmds += r.commands_;
+      if (!r.preamble_)
+	runit = true;
+    }
+    if (runit) {
+      if (opt_verbose >= 1)
+	std::cout << "** ACTION==" << udev_device_get_action(dev.get())
 		  << ", DEVPATH==\"" << udev_device_get_devpath(dev.get())
-		  << "\"" << std::endl;
+		  << "\"" << std::endl
+		  << debug;
       if (opt_verbose >= 2)
 	dump(std::cout, dev);
-      run(dev, r.commands_);
+      run(&dev, cmds);
     }
   }
 }
@@ -295,24 +286,32 @@ Uudev::loop()
 void
 Uudev::dumpconf()
 {
+  std::cout << "------------ DUMPING CONFIGURATION -----------" << std::endl;
   for (auto i : config_) {
     std::cout << i.rule_ << std::endl
 	      << i.commands_
 	      << "----------------------------------------------" << std::endl;
   }
+  std::cout << "------------ CONFIGURATION DUMPED ------------" << std::endl;
 }
 
-static std::regex rulerx(R"/(\s*(\w+)\s*(==|!=)\s*"([^"]*)"\s*)/");
-static DevPred
-parserule(std::string line)
+static std::regex rulestart(R"/(^\*[?!]*)/");
+static std::regex rulerx(R"/(^\s*(\w+)\s*(==|!=)\s*"([^"]*)"\s*)/");
+bool
+Uudev::Rule::parse(std::string line)
 {
-  if (line.size() < 2 || line[0] != '*' || !isspace(line[1]))
-    return nullptr;
+  auto p = line.cbegin(), e = line.cend();
+  std::smatch m;
+  if (!regex_search(p, e, m, rulestart))
+    return false;
+  p = m.suffix().first;
+  rule_ = line;
+  std::string flags(m.str(0));
+  immediate_ = flags.find('!') != flags.npos;
+  preamble_ = flags.find('?') != flags.npos;
+  pred_ = nullptr;
 
   DevPred ret([](const DevProps &p) { return true; });
-
-  auto p = line.cbegin() + 2, e = line.cend();
-  std::smatch m;
   while (regex_search(p, e, m, rulerx)) {
     const std::string k = m.str(1), v = m.str(3);
     if (m.str(2) == "==")
@@ -320,20 +319,21 @@ parserule(std::string line)
     else if (m.str(2) == "!=")
       ret = [=](const DevProps &p) { return p.neq(k, v) && ret(p); };
     else
-      return nullptr;
+      return false;
 
     p = m.suffix().first;
     if (p == e)
       break;
     else if (*p != ',')
-      return nullptr;
+      return false;
     p++;
   }
   while (p < e && isspace(*p))
     p++;
   if (p != e)
-    return nullptr;
-  return ret;
+    return false;
+  pred_ = ret;
+  return true;
 }
 
 bool
@@ -345,37 +345,25 @@ Uudev::parse(std::string path)
     return false;
   }
 
-  std::string trigger;
-  DevPred predicate;
-  std::ostringstream actions;
+  Rule r;
+  bool valid(false);
   for (int lineno = 1;; ++lineno) {
     std::string line;
     std::getline(file, line);
     if (!file || (!line.empty() && line[0] == '*')) {
-      if (predicate && actions.tellp()) {
-	Rule r;
-	r.rule_ = trigger;
-	r.pred_ = predicate;
-	r.commands_ = actions.str();
+      if (valid && !r.commands_.empty())
 	config_.emplace_back(std::move(r));
+      r.commands_.clear();
+      if (!file) {
+	return file.eof();
       }
-      trigger.clear();
-      actions.str("");
-    }
-    if (!file) {
-      return file.eof();
     }
     if (line.empty() || line[0] != '*') {
-      actions << line << std::endl;
-      continue;
+      r.commands_ += line;
+      r.commands_ += '\n';
     }
-    std::istringstream ss(line);
-    std::string star, act, dev;
-    trigger = line;
-    predicate = parserule(line);
-    if (!predicate) {
+    else if (!(valid = r.parse(line)))
       std::cerr << path << ":" << lineno << ": syntax error" << std::endl;
-    }
   }
   return true;
 }
@@ -471,9 +459,8 @@ main(int argc, char **argv)
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = SIG_IGN;
-    sigaction(SIGCHLD, &sa, nullptr);
     sigaction(SIGPIPE, &sa, nullptr);
-    if (opt_verbose > 0)
+    if (opt_verbose > 1)
       uu.dumpconf();
     uu.loop();
   }
