@@ -4,7 +4,7 @@
 
 # NAME
 
-uudev - micro-udev service
+uudev - micro-user-udev service
 
 # SYNOPSIS
 
@@ -78,7 +78,7 @@ The format of a test-line is:
 _TYPE_ always tarts with `*` and is optionally followed by one or both
 of `?` and `!`.  The `!` signifies that the shell code should also be
 run whenever `uudev` starts up.  This flag is useful, for instance, if
-you want to configure a device such a bluetooth keyboard when you
+you want to configure a device such as a bluetooth keyboard when you
 first start `uudev` (in case the device is already connected) as well
 as whenever the device subsequently connects.  When starting up, `!`
 rules are run without any device property environment variables, since
@@ -91,7 +91,7 @@ non-preamble test-line matches.  This flag is useful to set a shell
 variable or define shell functions that apply to all subsequent rules,
 or conceivably to filter out certain events by conditionally calling
 exit before later stanzas can execute.  For example, if you want to
-see all the commands being executed, you cal place this at the top of
+see all the commands being executed, you can place this at the top of
 your file:
 
     *!?
@@ -105,16 +105,17 @@ with `set -x`, which causes the shell to print the commands it is
 executing.
 
 The remainder of the test-line consists of tests separated by commas.
-Each test checks a _PROPERTY_ against a _VALUE_.  _OP_ can be either
-`==` or `!=` to check for equality or inequality.  Note that _VALUE_
-must always be enclosed in double quotes, and no wildcard matching is
-supported.  If _VALUE_ is empty, it also matches a missing property.
-A backslash (`\`) character in _VALUE_ escapes the next special
-character and can be used to insert a backslash or double-quote
-character.  There is no way to break a long predicate line over
-multiple lines (no backslash continuation lines).  A property either
-exactly matches the test value or does not.  You can always implement
-more refined tests in the shell code following the predicate.
+Each test checks a _PROPERTY_ against a _VALUE_.  The predicate line
+as a whole matches when all tests match (i.e., the tests are logically
+anded).  _OP_ can be either `==` or `!=` to check for equality or
+inequality.  There is no wildcard pattern matching, though you can
+implement more refined tests in shell code launched by a predicate.
+Note that _VALUE_ must always be enclosed in double quotes.  If
+_VALUE_ is empty, it also matches a missing property, so `!=""` can be
+used to test that a property exists.  A backslash (`\`) character in
+_VALUE_ escapes the next special character and can be used to insert a
+backslash or double-quote character.  There is no way to break a long
+predicate line over multiple lines.
 
 The `DEVLINK` property is special.  Since the system udev may create
 multiple inks to a device, `DEVLINK=="`_VALUE_`"` matches if any of
@@ -131,12 +132,12 @@ this configuration:
 Note `MAJOR!=""` avoids matching devices that get added without any
 device node.  This is because sometimes keyboard devices get added
 twice, once as a real device and once with `TAGS=:power-switch:`.
-Why?  Who knows--the point of uudev is that you don't need to
+Why?  Who knows---the point of uudev is that you don't need to
 understand all this systemd stuff and can just create rules by trial
 and error.
 
 If you have a Wacom tablet mapped to its own display, the stylus area
-will get uncalibrated each time the screen saver comes on.  You can
+will get uncalibrated every time the screen saver comes on.  You can
 fix this with the following stanza (if your tablet is xinerama display
 `HEAD-2`):
 
@@ -145,14 +146,14 @@ fix this with the following stanza (if your tablet is xinerama display
 	    xsetwacom set $dev MapToOutput HEAD-2
 	done
 
-Why match for empty `HID_UNIQ`?  Again, no idea--this is just trial
+Why match for empty `HID_UNIQ`?  Again, no idea---this is just trial
 and error.  There seem to be multiple devices that get added for the
 tablet, so to avoid running this command multiple times, or, worse,
 running it too early when not all the devices are ready (e.g., the
 touch screen might be ready but not the stylus) testing for an empty
 or missing `HID_UNIQ` seems to do the trick.
 
-Say you want to unlock your screen by killing the `xsecurelock` lock
+Say you want to unlock your screen by killing the `xsecurelock`
 program every time your phone connects to bluetooth.  (To do this,
 obviously you must trust your phone with the `bluetoothctl` `trust`
 command, so that it can connect automatically.)  The following stanza
@@ -161,9 +162,8 @@ would accomplish this:
 	* ACTION=="add", ID_BUS=="bluetooth", NAME=="\"Pixel (AVRCP)\""
 	pkill xsecurelock
 
-Again, here you have to use the monitor option (`-m`) to notice that
-udev places the name of your phone in double quotes and adds `
-(AVRCP)`.
+Again, here you have to use the monitor option (`-vm`) to notice that
+udev places the name of your phone in double quotes and adds ` (AVRCP)`.
 
 If you are paranoid, you might want to lock your screen whenever
 someone plugs a thumb drive into your computer.  The following rule
@@ -175,13 +175,13 @@ would acomplish that:
 Note it is important to put `xsecurelock` into the background with `&`
 for two reasons.  First, uudev will block waiting for the command to
 complete, so if the shell does not return stanzas like the above
-bluetooth unlock example will not run.  Second, there are actually
-multiple matching events when you plug in a thumb drive, so
-`xsecurelock` will get run multiple times.  It's smart enough to give
-up if the screen is already locked, but if you don't run it in the
-background then you will have to type your password several times
-before getting your screen back, as each `xsecurelock` will not run
-before the previous one has exited.
+bluetooth unlock example will not run until after `xsecurelock` has
+exited.  Second, there are actually multiple matching events when you
+plug in a thumb drive, so `xsecurelock` will get run multiple times.
+It's smart enough to give up if the screen is already locked, but if
+you don't run it in the background then you will have to type your
+password several times before getting your screen back, as each
+`xsecurelock` will not run before the previous one has exited.
 
 # ENVIRONMENT
 
