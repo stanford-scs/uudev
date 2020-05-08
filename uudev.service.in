@@ -3,7 +3,7 @@ Description=Micro udev service
 
 [Service]
 Type=simple
-ExecStart=@BINDIR@/bin/uudev
+ExecStart=@BINDIR@/uudev
 
 [Install]
 WantedBy=default.target
