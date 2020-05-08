@@ -8,7 +8,7 @@ DESTDIR = /
 PREFIX = /usr/local
 BINDIR = $(PREFIX)/bin
 UNITDIR = $(PREFIX)/lib/systemd/user
-MANDIR = $(PREFIX)/share/man
+MANDIR =
 
 all: $(TARGET) $(TARGET).1
 
@@ -28,14 +28,25 @@ install: all
 	    && mv -f "$(DESTDIR)$(UNITDIR)/$(TARGET).service~" \
 		"$(DESTDIR)$(UNITDIR)/$(TARGET).service"
 	if test -f $(TARGET).1; then \
-	    mkdir -p "$(DESTDIR)$(MANDIR)" && \
-	    cp $(TARGET).1 "$(DESTDIR)$(MANDIR)/"; \
+	    mandir="$(MANDIR)"; \
+	    if test -z "$$mandir"; then \
+		mandir="$(PREFIX)/man"; \
+	        if test ! -d "$(DESTDIR)$$mandir"; then \
+		    mandir="$(PREFIX)/share/man"; \
+		fi; \
+	    fi; \
+	    mkdir -p "$(DESTDIR)$$mandir/man1" && \
+		cp $(TARGET).1 "$(DESTDIR)$$mandir/man1/"; \
 	fi
 
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/$(TARGET)"
 	rm -f "$(DESTDIR)$(UNITDIR)/$(TARGET).service"
-	rm -f "$(DESTDIR)$(MANDIR)/$(TARGET).1"
+	if test -n "$(MANDIR)"; then					   \
+	    rm -f "$(DESTDIR)$(MANDIR)/man1/$(TARGET).1";		   \
+	else								   \
+	    rm -f "$(DESTDIR)$(PREFIX)/"{man,share/man}/"man1/$(TARGET).1"; \
+	fi
 
 $(TARGET).1: $(TARGET).1.md
 	-pandoc -s -w man -o $@ $@.md
