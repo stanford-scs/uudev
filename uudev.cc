@@ -218,7 +218,7 @@ struct Uudev {
     std::string commands_;
     bool immediate_ = false;
     bool preamble_ = false;
-    bool parse(std::string line);
+    bool parse(const std::string line);
   };
   std::vector<Rule> config_;
 
@@ -302,10 +302,35 @@ Uudev::dumpconf()
   std::cout << "------------ CONFIGURATION DUMPED ------------" << std::endl;
 }
 
-static std::regex rulestart(R"/(^\*[?!]*)/");
-static std::regex rulerx(R"/(^\s*(\w+)\s*(==|!=)\s*"([^"]*)"\s*)/");
+static std::string
+dequote(std::string in)
+{
+  std::string out;
+  for (auto c = in.cbegin(); c != in.cend(); ++c) {
+    if (*c != '\\') {
+      out += *c;
+      continue;
+    }
+    switch (*++c) {
+    case 'n':
+      out += '\n';
+      break;
+    case 't':
+      out += '\t';
+      break;
+    default:
+      out += *c;
+      break;
+    }
+  }
+  return out;
+}
+
+static const std::regex rulestart(R"/(^\*[?!]*)/");
+static const std::regex rulerx
+    (R"/(^\s*(\w+)\s*(==|!=)\s*"(([^"\\]|\\.)*)"\s*)/");
 bool
-Uudev::Rule::parse(std::string line)
+Uudev::Rule::parse(const std::string line)
 {
   auto p = line.cbegin(), e = line.cend();
   std::smatch m;
@@ -320,7 +345,7 @@ Uudev::Rule::parse(std::string line)
 
   DevPred ret([](const DevProps &p) { return true; });
   while (regex_search(p, e, m, rulerx)) {
-    const std::string k = m.str(1), v = m.str(3);
+    const std::string k = m.str(1), v = dequote(m.str(3));
     if (m.str(2) == "==")
       ret = [=](const DevProps &p) { return p.eq(k, v) && ret(p); };
     else if (m.str(2) == "!=")

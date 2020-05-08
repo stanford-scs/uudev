@@ -67,7 +67,9 @@ lines of shell script (not beginning `*`).  Every time there's a
 device event matching one or more non-preamble predicates, the shell
 scripts of stanzas with matching predicates are concatenated and piped
 to `/bin/sh` (with environment variables set for the device event
-properties).
+properties).  Uudev then waits for the shell to complete, so it is
+important to fork any long-running programs into the background when
+doing this.
 
 The format of a test-line is:
 
@@ -107,11 +109,12 @@ Each test checks a _PROPERTY_ against a _VALUE_.  _OP_ can be either
 `==` or `!=` to check for equality or inequality.  Note that _VALUE_
 must always be enclosed in double quotes, and no wildcard matching is
 supported.  If _VALUE_ is empty, it also matches a missing property.
-No character continuation lines or character escape sequences are
-permitted, so you can't test against a string containing double
-quotes.  A property either exactly matches the test value or does not.
-You can always implement more refined tests in the shell code
-following the predicate.
+A backslash (`\`) character in _VALUE_ escapes the next special
+character and can be used to insert a backslash or double-quote
+character.  There is no way to break a long predicate line over
+multiple lines (no backslash continuation lines).  A property either
+exactly matches the test value or does not.  You can always implement
+more refined tests in the shell code following the predicate.
 
 The `DEVLINK` property is special.  Since the system udev may create
 multiple inks to a device, `DEVLINK=="`_VALUE_`"` matches if any of
@@ -149,6 +152,37 @@ running it too early when not all the devices are ready (e.g., the
 touch screen might be ready but not the stylus) testing for an empty
 or missing `HID_UNIQ` seems to do the trick.
 
+Say you want to unlock your screen by killing the `xsecurelock` lock
+program every time your phone connects to bluetooth.  (To do this,
+obviously you must trust your phone with the `bluetoothctl` `trust`
+command, so that it can connect automatically.)  The following stanza
+would accomplish this:
+
+	* ACTION=="add", ID_BUS=="bluetooth", NAME=="\"Pixel (AVRCP)\""
+	pkill xsecurelock
+
+Again, here you have to use the monitor option (`-m`) to notice that
+udev places the name of your phone in double quotes and adds `
+(AVRCP)`.
+
+If you are paranoid, you might want to lock your screen whenever
+someone plugs a thumb drive into your computer.  The following rule
+would acomplish that:
+
+	* ACTION=="add", ID_BUS=="usb", SUBSYSTEM=="block", ID_DRIVE_THUMB=="1"
+	xsecurelock &
+
+Note it is important to put `xsecurelock` into the background with `&`
+for two reasons.  First, uudev will block waiting for the command to
+complete, so if the shell does not return stanzas like the above
+bluetooth unlock example will not run.  Second, there are actually
+multiple matching events when you plug in a thumb drive, so
+`xsecurelock` will get run multiple times.  It's smart enough to give
+up if the screen is already locked, but if you don't run it in the
+background then you will have to type your password several times
+before getting your screen back, as each `xsecurelock` will not run
+before the previous one has exited.
+
 # ENVIRONMENT
 
 uudev just passes environment variables through to the shell code it
@@ -161,13 +195,11 @@ The default configuration file location is `$HOME/.config/uudev.conf`.
 
 # BUGS
 
-There are no continuation lines.  There is no way to escape
-characters, including no way to match against strings that contain
-double quotes or newlines.  There's no way to write a line of shell
-code that begins with a `*` character (as might be useful in a
+There are no continuation lines.  There's no way to write a line of
+shell code that begins with a `*` character (as might be useful in a
 here-document).  There aren't really any comments in the configuration
-file (other than above the first predicate line); though of course you
-can use shell comments, they get passed through to the shell.
+file (other than above the first predicate line).  Of course, you can
+use just shell comments, but they get passed through to the shell.
 
 # SEE ALSO
 

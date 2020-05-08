@@ -2,7 +2,7 @@
 TARGET = uudev
 
 CPPFLAGS = $$(pkg-config --cflags libudev)
-CXXFLAGS = -std=c++17 -g -O
+CXXFLAGS = -std=c++17 -g
 LIBS = $$(pkg-config --libs libudev)
 DESTDIR = /
 PREFIX = /usr/local
