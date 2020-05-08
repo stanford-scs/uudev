@@ -146,12 +146,12 @@ fix this with the following stanza (if your tablet is xinerama display
 	    xsetwacom set $dev MapToOutput HEAD-2
 	done
 
-Why match for empty `HID_UNIQ`?  Again, no idea---this is just trial
-and error.  There seem to be multiple devices that get added for the
-tablet, so to avoid running this command multiple times, or, worse,
-running it too early when not all the devices are ready (e.g., the
-touch screen might be ready but not the stylus) testing for an empty
-or missing `HID_UNIQ` seems to do the trick.
+Why match for non-empty `HID_UNIQ`?  Again, no idea---this is just
+trial and error.  There seem to be multiple devices that get added for
+the tablet, so to avoid running this command multiple times, or,
+worse, running it too early when not all the devices are ready (e.g.,
+the touch screen might be ready but not the stylus) testing for an
+empty or missing `HID_UNIQ` seems to do the trick.
 
 Say you want to unlock your screen by killing the `xsecurelock`
 program every time your phone connects to bluetooth.  (To do this,
@@ -174,14 +174,15 @@ would acomplish that:
 
 Note it is important to put `xsecurelock` into the background with `&`
 for two reasons.  First, uudev will block waiting for the command to
-complete, so if the shell does not return stanzas like the above
-bluetooth unlock example will not run until after `xsecurelock` has
-exited.  Second, there are actually multiple matching events when you
-plug in a thumb drive, so `xsecurelock` will get run multiple times.
-It's smart enough to give up if the screen is already locked, but if
-you don't run it in the background then you will have to type your
-password several times before getting your screen back, as each
-`xsecurelock` will not run before the previous one has exited.
+complete.  Hence, if the shell script launching `xsecurelock` does not
+return immediately, stanzas such as the above bluetooth unlock example
+will not run until after `xsecurelock` has exited.  Second, there are
+actually multiple matching events when you plug in a thumb drive, so
+`xsecurelock` will get run multiple times.  It's smart enough to give
+up if the screen is already locked, but if you don't run it in the
+background then you will have to type your password several times
+before getting your screen back, as each `xsecurelock` will run
+immediately after the previous one has exited.
 
 # ENVIRONMENT
 
@@ -204,4 +205,3 @@ use just shell comments, but they get passed through to the shell.
 # SEE ALSO
 
 udev(7)
-
