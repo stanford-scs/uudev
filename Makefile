@@ -20,9 +20,8 @@ $(TARGET): $(TARGET).o
 .SUFFIXES: .cc .o
 
 install: all
-	mkdir -p "$(DESTDIR)$(BINDIR)" "$(DESTDIR)$(UNITDIR)"
-	cp $(TARGET) "$(DESTDIR)$(BINDIR)/$(TARGET)"
-	strip "$(DESTDIR)$(BINDIR)/$(TARGET)"
+	install -d "$(DESTDIR)$(BINDIR)" "$(DESTDIR)$(UNITDIR)"
+	install -s $(TARGET) "$(DESTDIR)$(BINDIR)/$(TARGET)"
 	sed -e 's:@BINDIR@:$(BINDIR):' "$(TARGET).service.in" \
 		> "$(DESTDIR)$(UNITDIR)/$(TARGET).service~" \
 	    && mv -f "$(DESTDIR)$(UNITDIR)/$(TARGET).service~" \
@@ -35,8 +34,8 @@ install: all
 		    mandir="$(PREFIX)/share/man"; \
 		fi; \
 	    fi; \
-	    mkdir -p "$(DESTDIR)$$mandir/man1" && \
-		cp $(TARGET).1 "$(DESTDIR)$$mandir/man1/"; \
+	    install -d "$(DESTDIR)$$mandir/man1" && \
+		install $(TARGET).1 "$(DESTDIR)$$mandir/man1/"; \
 	fi
 
 uninstall:

@@ -5,5 +5,10 @@ Description=Micro udev service
 Type=simple
 ExecStart=@BINDIR@/uudev
 
-[Install]
-WantedBy=default.target
+# If you install this unit file, it may run with the wrong DISPLAY
+# environment variable.  It is better to put
+#     systemctl --user restart uudev
+# in your .xinitrc or .xsession file
+#
+#[Install]
+#WantedBy=default.target

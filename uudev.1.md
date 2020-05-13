@@ -29,18 +29,13 @@ system.
 
 Typically you will want to run `uudev -vp` or `uudev -vm` and based on
 the output create a `$HOME/.config/uudev.conf` file.  Then test that
-it does what you want by running `uudev -v`.  Finally, to enable
-`uudev` by default run:
-
-	systemctl --user enable --now uudev
-
-This can be reversed by changing the `enable` to `disable`, or
-manually removing the link in
-`$HOME/.config/systemd/user/default.target.wants`.  Any time you edit
-the configuration file, you must restart `uudev`.  Once you are using
-systemd, you can do this with:
+it does what you want by running `uudev -v`.  Finally, to start
+`uudev`, either just run it (`uudev &`) or start it with systemd:
 
 	systemctl --user restart uudev
+
+Any time you edit the configuration file, you must kill and restart
+`uudev`, which you can do by re-running that `systemctl` command.
 
 ## OPTIONS
 
