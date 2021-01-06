@@ -113,7 +113,7 @@ backslash or double-quote character.  There is no way to break a long
 predicate line over multiple lines.
 
 The `DEVLINK` property is special.  Since the system udev may create
-multiple inks to a device, `DEVLINK=="`_VALUE_`"` matches if any of
+multiple links to a device, `DEVLINK=="`_VALUE_`"` matches if any of
 the device's links is _VALUE_.
 
 # EXAMPLES
