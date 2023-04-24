@@ -173,7 +173,7 @@ run(const unique_udev_device_t *dev, const std::string cmds)
       close(fds[0]);
     }
     execl("/bin/sh", "/bin/sh", nullptr);
-    exit(1);
+    _exit(1);
   }
   close(fds[0]);
   if (opt_verbose >= 3) {

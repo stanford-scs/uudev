@@ -1,6 +1,6 @@
 # Micro-user-udev service
 
-`uudev` is a linux program than launches other programs in response to
+`uudev` is a linux program that launches other programs in response to
 devices being added and removed from the system.  Unlike the
 system-level [udev] program, `uudev` is designed to be run by users in
 their Xorg sessions.  Hence it can easily do things like change key
